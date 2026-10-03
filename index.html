@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BMW M4 — The Art of Power</title>
   <meta name="description" content="Unofficial BMW M4 fan concept experience. Not affiliated with BMW AG." />
+  <meta property="og:title" content="BMW M4 — The Art of Power" />
+  <meta property="og:description" content="Unofficial BMW M4 fan concept experience. Not affiliated with BMW AG." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;700&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -23,27 +25,8 @@
     </div>
   </div>
 
-  <!-- Entry screen -->
-  <div id="entry-screen">
-    <div class="entry-content">
-      <div class="entry-logo">M4</div>
-      <h1 class="entry-title" data-en="THE ART OF POWER" data-ar="فن القوة">THE ART OF POWER</h1>
-      <p class="entry-sub" data-en="BMW M4 — Unofficial Fan Concept" data-ar="بي إم دبليو M4 — تصميم تجريبي غير رسمي">BMW M4 — Unofficial Fan Concept</p>
-      <div class="entry-btns">
-        <button class="btn-primary" id="btn-sound">
-          <span class="btn-icon">♪</span>
-          <span data-en="Enter with Sound" data-ar="الدخول مع الصوت">Enter with Sound</span>
-        </button>
-        <button class="btn-ghost" id="btn-no-sound">
-          <span data-en="Enter without Sound" data-ar="الدخول بدون صوت">Enter without Sound</span>
-        </button>
-      </div>
-    </div>
-    <div class="entry-grain"></div>
-  </div>
-
   <!-- Main experience -->
-  <div id="experience" class="hidden">
+  <div id="experience">
     <!-- Fixed canvas -->
     <canvas id="main-canvas"></canvas>
 
@@ -66,6 +49,7 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path id="sound-icon-path" d="M11 5L6 9H2v6h4l5 4V5z"/>
           <path id="sound-waves" d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          <line id="sound-slash" x1="2" y1="2" x2="22" y2="22" stroke="currentColor" stroke-width="2" style="display:none;"/>
         </svg>
       </button>
     </div>

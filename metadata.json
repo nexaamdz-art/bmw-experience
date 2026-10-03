@@ -1,0 +1,8 @@
+{
+  "name": "BMW M4 — The Art of Power",
+  "description": "Unofficial BMW M4 fan concept experience. Not affiliated with BMW AG.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

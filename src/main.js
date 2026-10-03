@@ -1,469 +1,794 @@
-/**
- * main.js
- * BMW M4 Fan Concept — The Art of Power
- * Orchestrator: Lenis smooth scroll, GSAP ScrollTrigger, Canvas image-sequence rendering,
- * Web Audio synchronization, i18n, and progressive preloading.
- */
-
-import './style.css';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
-import { detectRealFrameCounts, ProgressiveLoader } from './frameLoader.js';
-import { CanvasRenderer } from './canvasRenderer.js';
-import { AudioManager } from './audioManager.js';
-import { I18n } from './i18n.js';
+import gsap from 'gsap';
 
-gsap.registerPlugin(ScrollTrigger);
-
-/* ─────────────────────────────────────────────
-   CONSTANTS & TIMELINE CONFIG
-───────────────────────────────────────────── */
-const MOBILE_BREAKPOINT = 768;
-const CROSSFADE_FRAMES = 6;
-
-// 8 Timeline chapters across one continuous 900vh scroll
-const CHAPTERS = [
-  { id: 'scene-1', seq: 1, name: 's1', start: 0.000, end: 0.125, isReverse: false },
-  { id: 'scene-2', seq: 2, name: 's2', start: 0.125, end: 0.250, isReverse: false },
-  { id: 'scene-3', seq: 3, name: 's3', start: 0.250, end: 0.375, isReverse: false },
-  { id: 'scene-r', seq: 'r', name: 'reverse', start: 0.375, end: 0.520, isReverse: true },
-  { id: 'scene-4', seq: 4, name: 's4', start: 0.520, end: 0.640, isReverse: false },
-  { id: 'scene-5', seq: 5, name: 's5', start: 0.640, end: 0.760, isReverse: false },
-  { id: 'scene-6', seq: 6, name: 's6', start: 0.760, end: 0.880, isReverse: false },
-  { id: 'scene-7', seq: 7, name: 's7', start: 0.880, end: 1.000, isReverse: false },
+// ==========================================================================
+// Configuration & State
+// ==========================================================================
+const SCENE_CONFIGS = [
+  { id: 'scene-1', folder: 's1', frameCount: 192, soundKey: 'scene-1' },
+  { id: 'scene-2', folder: 's2', frameCount: 192, soundKey: 'scene-2' },
+  { id: 'scene-3', folder: 's3', frameCount: 192, soundKey: 'scene-3' },
+  { id: 'scene-r', reverse: true, soundKey: 'scene-r' },
+  { id: 'scene-4', folder: 's4', frameCount: 240, soundKey: 'scene-4' },
+  { id: 'scene-5', folder: 's5', frameCount: 171, soundKey: 'scene-5' },
+  { id: 'scene-6', folder: 's6', frameCount: 240, soundKey: 'scene-6' },
+  { id: 'scene-7', folder: 's7', frameCount: 192, soundKey: 'scene-7' },
 ];
 
-/* ─────────────────────────────────────────────
-   GLOBAL STATE
-───────────────────────────────────────────── */
-let isMobile = window.innerWidth < MOBILE_BREAKPOINT;
-let frameCounts = { 1: 192, 2: 192, 3: 192, 4: 240, 5: 240, 6: 240, 7: 192 };
-let progressiveLoader;
-let renderer;
-let audio;
-let i18n;
-let lenis;
-let statsAnimated = false;
-let experienceActive = false;
+const COLOR_NAMES = {
+  'Isle of Man Green': { en: 'Isle of Man Green', ar: 'أخضر جزيرة مان' },
+  'Sao Paulo Yellow': { en: 'Sao Paulo Yellow', ar: 'أصفر ساو باولو' },
+  'Toronto Red': { en: 'Toronto Red', ar: 'أحمر تورونتو' },
+  'Portimao Blue': { en: 'Portimao Blue', ar: 'أزرق بورتيماو' },
+  'Frozen Deep Grey': { en: 'Frozen Deep Grey', ar: 'رمادي داكن متجمد' },
+  'Alpine White': { en: 'Alpine White', ar: 'أبيض ألبين' },
+};
 
-/* ─────────────────────────────────────────────
-   DOM REFERENCES
-───────────────────────────────────────────── */
-const loaderEl = document.getElementById('loader');
-const loaderFill = document.getElementById('loader-fill');
-const loaderPct = document.getElementById('loader-pct');
-const loaderLabel = document.getElementById('loader-label');
-const entryScreen = document.getElementById('entry-screen');
-const experience = document.getElementById('experience');
-const canvas = document.getElementById('main-canvas');
-const progressLine = document.getElementById('progress-line');
-const btnSound = document.getElementById('btn-sound');
-const btnNoSound = document.getElementById('btn-no-sound');
-const btnLang = document.getElementById('btn-lang');
-const btnMute = document.getElementById('btn-mute');
-const langLabel = document.getElementById('lang-label');
-const scrollContainer = document.getElementById('scroll-container');
+const state = {
+  soundEnabled: true,
+  soundInitialized: false,
+  currentLang: 'en',
+  statsAnimated: false,
+  currentSceneIndex: -1,
+  activeColor: 'Isle of Man Green',
+};
 
-/* ─────────────────────────────────────────────
-   INITIALIZATION
-───────────────────────────────────────────── */
-async function init() {
-  isMobile = window.innerWidth < MOBILE_BREAKPOINT;
+// ==========================================================================
+// Intelligent Cross-Fading Audio Engine (Zero-Glitch, Context-Aware)
+// ==========================================================================
+class AudioManager {
+  constructor() {
+    this.players = {
+      'scene-1': new Audio('/audio/startup.mp3'),
+      'scene-2': new Audio('/audio/teardown.mp3'),
+      'scene-3': new Audio('/audio/engine_dive.mp3'),
+      'scene-r': new Audio('/audio/reassemble.mp3'),
+      'scene-4': new Audio('/audio/headlight.mp3'),
+      'scene-5': new Audio('/audio/grille.mp3'),
+      'scene-6': new Audio('/audio/aerodynamics.mp3'),
+      'scene-7': new Audio('/audio/launch.mp3'),
+    };
 
-  // 1. Probe & cache actual frame counts automatically
-  loaderLabel.textContent = 'Analyzing assets…';
-  frameCounts = await detectRealFrameCounts(isMobile);
+    Object.values(this.players).forEach((a) => {
+      a.preload = 'auto';
+      a.volume = 0;
+    });
 
-  // 2. Initialize subsystems
-  progressiveLoader = new ProgressiveLoader(frameCounts, isMobile);
-  renderer = new CanvasRenderer(canvas);
-  audio = new AudioManager();
-  i18n = new I18n();
-
-  // 3. Preload section 1 for seamless entrance
-  loaderLabel.textContent = 'Loading experience…';
-  let loadedFrames = 0;
-  const s1Count = frameCounts[1];
-
-  await progressiveLoader.loadSection(1, () => {
-    loadedFrames++;
-    const pct = Math.min(100, Math.round((loadedFrames / s1Count) * 100));
-    loaderFill.style.width = `${pct}%`;
-    loaderPct.textContent = `${pct}%`;
-  });
-
-  // Render initial frame immediately
-  const firstFrame = progressiveLoader.getFrame(1, 1);
-  if (firstFrame) {
-    renderer.setFrame(firstFrame);
+    this.currentSceneId = null;
+    this.currentAudio = null;
+    this.idleTimer = null;
+    this.isMuted = false;
   }
 
-  // 4. Background preloading of sequences 2..7
-  preloadRemainingSequences();
-
-  // 5. Reveal entry screen
-  loaderEl.classList.add('fade-out');
-  setTimeout(() => loaderEl.classList.add('hidden'), 650);
-
-  // 6. Hook up entry buttons
-  btnSound.addEventListener('click', () => enterExperience(true));
-  btnNoSound.addEventListener('click', () => enterExperience(false));
-}
-
-async function preloadRemainingSequences() {
-  const seqs = [2, 3, 4, 5, 6, 7];
-  for (const seq of seqs) {
-    await progressiveLoader.loadSection(seq, null, 6);
-    // Yield to main thread
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  }
-}
-
-/* ─────────────────────────────────────────────
-   ENTER EXPERIENCE
-───────────────────────────────────────────── */
-async function enterExperience(withSound) {
-  if (experienceActive) return;
-  experienceActive = true;
-
-  // Initialize audio post user click
-  await audio.init(withSound);
-  if (withSound) {
-    await Promise.all([
-      audio.loadTrack('teardown', '/audio/teardown.mp3'),
-      audio.loadTrack('engine', '/audio/engine_dive.mp3'),
-      audio.loadTrack('launch', '/audio/launch.mp3'),
-    ]);
+  unlockAll() {
+    Object.values(this.players).forEach((a) => {
+      a.play().then(() => {
+        a.pause();
+        a.currentTime = 0;
+      }).catch(() => {});
+    });
   }
 
-  // Transition UI
-  entryScreen.classList.add('fade-out');
-  setTimeout(() => entryScreen.classList.add('hidden'), 800);
-  experience.classList.remove('hidden');
+  playScene(sceneId, isForward = true) {
+    if (!state.soundEnabled || this.isMuted) return;
 
-  // Allow scrolling
-  document.body.style.overflow = '';
-
-  // Setup height (900vh total)
-  scrollContainer.style.height = '900vh';
-
-  // Setup smooth scroll & ScrollTrigger
-  setupLenis();
-  setupTimelineScrubber();
-  setupControls(withSound);
-
-  // Trigger initial frame
-  updateTimeline(0);
-}
-
-/* ─────────────────────────────────────────────
-   LENIS SMOOTH SCROLL
-───────────────────────────────────────────── */
-function setupLenis() {
-  lenis = new Lenis({
-    duration: 1.2,
-    easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-    orientation: 'vertical',
-    smoothWheel: true,
-    wheelMultiplier: 0.9,
-    touchMultiplier: 1.4,
-  });
-
-  lenis.on('scroll', ScrollTrigger.update);
-  gsap.ticker.add((time) => lenis.raf(time * 1000));
-  gsap.ticker.lagSmoothing(0);
-}
-
-/* ─────────────────────────────────────────────
-   MASTER TIMELINE SCRUBBER
-───────────────────────────────────────────── */
-function setupTimelineScrubber() {
-  ScrollTrigger.create({
-    trigger: '#scroll-container',
-    start: 'top top',
-    end: 'bottom bottom',
-    scrub: true,
-    onUpdate: (self) => {
-      updateTimeline(self.progress);
-    },
-  });
-}
-
-function updateTimeline(progress) {
-  const p = Math.max(0, Math.min(1, progress));
-
-  // Update vertical amber progress line
-  if (progressLine) {
-    progressLine.style.height = `${p * 100}%`;
-  }
-
-  // 1. Identify active chapter
-  let activeChapter = CHAPTERS[0];
-  let activeIndex = 0;
-
-  for (let i = 0; i < CHAPTERS.length; i++) {
-    if (p >= CHAPTERS[i].start && p <= CHAPTERS[i].end) {
-      activeChapter = CHAPTERS[i];
-      activeIndex = i;
-      break;
-    }
-  }
-  if (p > CHAPTERS[CHAPTERS.length - 1].end) {
-    activeChapter = CHAPTERS[CHAPTERS.length - 1];
-    activeIndex = CHAPTERS.length - 1;
-  }
-
-  const duration = activeChapter.end - activeChapter.start;
-  const localP = duration > 0 ? Math.max(0, Math.min(1, (p - activeChapter.start) / duration)) : 0;
-
-  // 2. Render Canvas Frames with Cross-fade Logic
-  renderChapterFrame(activeChapter, activeIndex, localP);
-
-  // 3. Audio Synchronization
-  syncAudio(activeChapter, localP);
-
-  // 4. Text Card Transitions
-  updateTextOverlays(activeChapter, activeIndex, localP);
-
-  // 5. Stat Counter Triggering
-  if (activeChapter.id === 'scene-3') {
-    if (localP >= 0.1 && !statsAnimated) {
-      statsAnimated = true;
-      animateStatCounters();
-    }
-  } else if (p < 0.2) {
-    // Reset counter if user scrolls back near top
-    statsAnimated = false;
-  }
-}
-
-/* ─────────────────────────────────────────────
-   CANVAS FRAME RENDERING WITH CROSS-FADE
-───────────────────────────────────────────── */
-function renderChapterFrame(chapter, chapterIndex, localP) {
-  let currentBmp = null;
-  let nextBmp = null;
-  let crossAlpha = 0;
-
-  if (chapter.seq === 'r') {
-    // REASSEMBLY: s3 reverse then s2 reverse
-    const s3Count = frameCounts[3] || 192;
-    const s2Count = frameCounts[2] || 192;
-
-    if (localP < 0.5) {
-      // First half: s3 in reverse (s3Count down to 1)
-      const subP = localP / 0.5;
-      const fNum = Math.max(1, Math.min(s3Count, Math.round((1 - subP) * (s3Count - 1)) + 1));
-      currentBmp = progressiveLoader.getFrame(3, fNum);
-
-      // Cross-fade to s2 reverse near midpoint
-      if (subP > 0.9) {
-        crossAlpha = (subP - 0.9) / 0.1;
-        nextBmp = progressiveLoader.getFrame(2, s2Count);
+    if (!isForward && this.currentSceneId !== sceneId) {
+      if (this.currentAudio) {
+        this.fadeOut(this.currentAudio, 500);
       }
+      this.currentSceneId = sceneId;
+      this.currentAudio = null;
+      return;
+    }
+
+    if (this.currentSceneId === sceneId && this.currentAudio && !this.currentAudio.paused) {
+      return;
+    }
+
+    const nextAudio = this.players[sceneId];
+    if (!nextAudio) return;
+
+    if (this.currentAudio && this.currentAudio !== nextAudio) {
+      this.fadeOut(this.currentAudio, 350);
+    }
+
+    this.currentSceneId = sceneId;
+    this.currentAudio = nextAudio;
+
+    if (nextAudio.paused || nextAudio.currentTime > 7) {
+      nextAudio.currentTime = 0;
+    }
+
+    this.fadeIn(nextAudio, 0.75, 300);
+  }
+
+  fadeIn(audio, targetVol = 0.75, duration = 300) {
+    if (!state.soundEnabled || this.isMuted) return;
+    audio.play().catch(() => {});
+
+    clearInterval(audio._fadeInterval);
+    const stepTime = 25;
+    const step = (targetVol / (duration / stepTime));
+
+    audio._fadeInterval = setInterval(() => {
+      if (audio.volume + step >= targetVol) {
+        audio.volume = targetVol;
+        clearInterval(audio._fadeInterval);
+      } else {
+        audio.volume = Math.min(targetVol, audio.volume + step);
+      }
+    }, stepTime);
+  }
+
+  fadeOut(audio, duration = 400) {
+    if (!audio) return;
+    clearInterval(audio._fadeInterval);
+
+    const stepTime = 25;
+    const current = audio.volume;
+    const step = current / (duration / stepTime);
+
+    audio._fadeInterval = setInterval(() => {
+      if (audio.volume - step <= 0.02) {
+        audio.volume = 0;
+        audio.pause();
+        clearInterval(audio._fadeInterval);
+      } else {
+        audio.volume = Math.max(0, audio.volume - step);
+      }
+    }, stepTime);
+  }
+
+  onUserScroll(progress, direction) {
+    if (!state.soundEnabled || this.isMuted) return;
+
+    if (this.currentAudio && this.currentAudio.volume < 0.4 && !this.currentAudio.paused) {
+      this.fadeIn(this.currentAudio, 0.75, 200);
+    }
+
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      if (this.currentAudio) {
+        this.fadeOut(this.currentAudio, 600);
+      }
+    }, 1400);
+  }
+
+  stopAll() {
+    clearTimeout(this.idleTimer);
+    Object.values(this.players).forEach((a) => {
+      clearInterval(a._fadeInterval);
+      a.pause();
+      a.volume = 0;
+      a.currentTime = 0;
+    });
+    this.currentSceneId = null;
+    this.currentAudio = null;
+  }
+}
+
+const audioManager = new AudioManager();
+
+// ==========================================================================
+// Image Cache & Preloader (100% IFrame & Cross-Browser Safe)
+// ==========================================================================
+const frameCache = new Map();
+const requestedKeys = new Set();
+let lastDrawnImg = null;
+
+function getFrameKey(folder, frameNum) {
+  return `${folder}/${frameNum}`;
+}
+
+function formatFrameNumber(num) {
+  return String(num).padStart(4, '0');
+}
+
+function getFrameUrl(folder, frameNum) {
+  return `/frames/${folder}/f_${formatFrameNumber(frameNum)}.webp`;
+}
+
+function loadSingleImage(folder, frameNum) {
+  const key = getFrameKey(folder, frameNum);
+  if (frameCache.has(key) || requestedKeys.has(key)) {
+    return Promise.resolve(frameCache.get(key));
+  }
+
+  requestedKeys.add(key);
+  const img = new Image();
+  img.src = getFrameUrl(folder, frameNum);
+
+  return new Promise((resolve) => {
+    img.onload = () => {
+      frameCache.set(key, img);
+      resolve(img);
+    };
+    img.onerror = () => {
+      resolve(null);
+    };
+  });
+}
+
+function preloadUpcomingFrames(currentFolder, currentFrame) {
+  for (let i = 1; i <= 20; i++) {
+    loadSingleImage(currentFolder, currentFrame + i);
+  }
+}
+
+function startIdlePreload() {
+  const scenes = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
+  let sIdx = 0;
+  let fIdx = 1;
+
+  function loadNextStep() {
+    if (sIdx >= scenes.length) return;
+    const folder = scenes[sIdx];
+    const maxF = folder === 's4' || folder === 's6' ? 240 : (folder === 's5' ? 171 : 192);
+
+    for (let i = 0; i < 6; i++) {
+      if (fIdx <= maxF) {
+        loadSingleImage(folder, fIdx);
+        fIdx++;
+      } else {
+        sIdx++;
+        fIdx = 1;
+        break;
+      }
+    }
+
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(loadNextStep);
     } else {
-      // Second half: s2 in reverse (s2Count down to 1)
-      const subP = (localP - 0.5) / 0.5;
-      const fNum = Math.max(1, Math.min(s2Count, Math.round((1 - subP) * (s2Count - 1)) + 1));
-      currentBmp = progressiveLoader.getFrame(2, fNum);
+      setTimeout(loadNextStep, 35);
+    }
+  }
 
-      // Cross-fade to s4 at end
-      if (subP > 0.9) {
-        crossAlpha = (subP - 0.9) / 0.1;
-        nextBmp = progressiveLoader.getFrame(4, 1);
-      }
+  setTimeout(loadNextStep, 400);
+}
+
+// ==========================================================================
+// Canvas Renderer (Robust, Crisp, Zero-Crash)
+// ==========================================================================
+let canvas = null;
+let ctx = null;
+
+function initCanvas() {
+  canvas = document.getElementById('main-canvas');
+  if (!canvas) return;
+  ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+  }
+  resizeCanvas();
+}
+
+function resizeCanvas() {
+  if (!canvas || !ctx) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = window.innerWidth || 1280;
+  const h = window.innerHeight || 720;
+
+  const targetW = Math.min(Math.floor(w * dpr), 1920);
+  const targetH = Math.min(Math.floor(h * dpr), 1080);
+
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+  }
+
+  if (lastDrawnImg) {
+    drawDirect(lastDrawnImg);
+  }
+}
+
+window.addEventListener('resize', resizeCanvas);
+
+function drawDirect(img) {
+  if (!ctx || !canvas || !img) return;
+  lastDrawnImg = img;
+
+  const cw = canvas.width;
+  const ch = canvas.height;
+  const iw = img.naturalWidth || img.width || 1600;
+  const ih = img.naturalHeight || img.height || 900;
+
+  if (cw <= 0 || ch <= 0 || iw <= 0 || ih <= 0) return;
+
+  const scale = Math.max(cw / iw, ch / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = (cw - dw) * 0.5;
+  const dy = (ch - dh) * 0.5;
+
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+function renderSceneProgress(sceneIndex, sceneProgress) {
+  const scene = SCENE_CONFIGS[sceneIndex];
+  if (!scene) return;
+
+  let folder = scene.folder;
+  let targetFrame = 1;
+  let total = scene.frameCount || 192;
+
+  if (scene.reverse) {
+    if (sceneProgress < 0.5) {
+      folder = 's3';
+      total = 192;
+      const p = sceneProgress / 0.5;
+      targetFrame = Math.max(1, Math.min(192, Math.round(192 - p * 191)));
+    } else {
+      folder = 's2';
+      total = 192;
+      const p = (sceneProgress - 0.5) / 0.5;
+      targetFrame = Math.max(1, Math.min(192, Math.round(192 - p * 191)));
     }
   } else {
-    // STANDARD SEQUENCE (s1, s2, s3, s4, s5, s6, s7)
-    const seq = chapter.seq;
-    const count = frameCounts[seq] || 192;
-    const frameIdx = Math.max(1, Math.min(count, Math.round(localP * (count - 1)) + 1));
-    currentBmp = progressiveLoader.getFrame(seq, frameIdx);
+    targetFrame = Math.max(1, Math.min(total, Math.round(1 + sceneProgress * (total - 1))));
+  }
 
-    // Cross-fade 6 frames before chapter boundary
-    const fadeStart = 1 - CROSSFADE_FRAMES / count;
-    if (localP > fadeStart && chapterIndex < CHAPTERS.length - 1) {
-      crossAlpha = (localP - fadeStart) / (CROSSFADE_FRAMES / count);
-      const nextChapter = CHAPTERS[chapterIndex + 1];
+  const key = getFrameKey(folder, targetFrame);
+  const exactImg = frameCache.get(key);
 
-      if (nextChapter.seq === 'r') {
-        // Reassembly begins with s3's final frame
-        nextBmp = progressiveLoader.getFrame(3, frameCounts[3] || 192);
-      } else {
-        nextBmp = progressiveLoader.getFrame(nextChapter.seq, 1);
-      }
+  if (exactImg) {
+    drawDirect(exactImg);
+    preloadUpcomingFrames(folder, targetFrame);
+    return;
+  }
+
+  loadSingleImage(folder, targetFrame).then((img) => {
+    if (img && !lastDrawnImg) {
+      drawDirect(img);
+    }
+  });
+
+  preloadUpcomingFrames(folder, targetFrame);
+
+  for (let offset = 1; offset <= 35; offset++) {
+    const prev = frameCache.get(getFrameKey(folder, Math.max(1, targetFrame - offset)));
+    if (prev) {
+      drawDirect(prev);
+      return;
+    }
+    const next = frameCache.get(getFrameKey(folder, Math.min(total, targetFrame + offset)));
+    if (next) {
+      drawDirect(next);
+      return;
     }
   }
 
-  renderer.setFrame(currentBmp, nextBmp, crossAlpha);
-}
-
-/* ─────────────────────────────────────────────
-   AUDIO SYNCHRONIZATION
-───────────────────────────────────────────── */
-function syncAudio(chapter, localP) {
-  switch (chapter.id) {
-    case 'scene-2':
-      // s2: teardown.mp3 synced to scroll
-      audio.playTrack('teardown', { loop: true, volume: 0.25 + 0.75 * localP });
-      audio.stopTrack('engine', 0.2);
-      audio.stopTrack('launch', 0.2);
-      break;
-
-    case 'scene-3':
-      // s3: engine_dive.mp3 synced to scroll
-      audio.playTrack('engine', { loop: true, volume: 0.3 + 0.7 * localP });
-      audio.stopTrack('teardown', 0.2);
-      audio.stopTrack('launch', 0.2);
-      break;
-
-    case 'scene-r':
-      // Reassembly: audio muted or very low
-      audio.setVolume('teardown', 0.05);
-      audio.setVolume('engine', 0.05);
-      audio.stopTrack('launch', 0.2);
-      break;
-
-    case 'scene-7':
-      // s7: launch.mp3 with volume and playbackRate rising with scroll
-      audio.playTrack('launch', { loop: false, volume: Math.min(1.0, 0.2 + localP * 0.8) });
-      audio.setVolume('launch', Math.min(1.0, 0.2 + localP * 0.8));
-      audio.setPlaybackRate('launch', 0.8 + localP * 0.6);
-      audio.stopTrack('teardown', 0.2);
-      audio.stopTrack('engine', 0.2);
-      break;
-
-    default:
-      // s1, s4, s5, s6: fade out ambient engine/teardown/launch
-      audio.stopTrack('teardown', 0.4);
-      audio.stopTrack('engine', 0.4);
-      audio.stopTrack('launch', 0.4);
-      break;
+  if (lastDrawnImg) {
+    drawDirect(lastDrawnImg);
   }
 }
 
-/* ─────────────────────────────────────────────
-   TEXT OVERLAY OPACITY & TRANSFORMS
-───────────────────────────────────────────── */
-function updateTextOverlays(activeChapter, activeIndex, localP) {
-  CHAPTERS.forEach((ch, idx) => {
-    const el = document.querySelector(`#${ch.id} .scene-text`);
-    if (!el) return;
+// ==========================================================================
+// Smooth Lenis Scroll & Synced Audio Loop
+// ==========================================================================
+let lenis = null;
+let targetProgress = 0;
+let smoothProgress = 0;
+let lastRenderVal = -1;
+let prevSmoothProgress = 0;
 
-    if (ch.id === activeChapter.id) {
-      let opacity = 1;
-      let y = 0;
+function setupScroll() {
+  lenis = new Lenis({
+    duration: 1.1,
+    easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+    smoothWheel: true,
+    touchMultiplier: 1.5,
+  });
 
-      if (idx === 0) {
-        // First scene starts fully visible, fades out near end
-        if (localP > 0.75) {
-          opacity = 1 - (localP - 0.75) / 0.25;
-          y = -24 * (1 - opacity);
-        }
-      } else if (idx === CHAPTERS.length - 1) {
-        // Last scene fades in, stays visible for CTA
-        if (localP < 0.2) {
-          opacity = localP / 0.2;
-          y = 24 * (1 - opacity);
-        }
-      } else {
-        // Intermediate scenes fade in and fade out
-        if (localP < 0.15) {
-          opacity = localP / 0.15;
-          y = 24 * (1 - opacity);
-        } else if (localP > 0.85) {
-          opacity = 1 - (localP - 0.85) / 0.15;
-          y = -24 * (1 - opacity);
-        }
-      }
+  const progressLine = document.getElementById('progress-line');
+  const sections = Array.from(document.querySelectorAll('.scene'));
+  const totalScenes = SCENE_CONFIGS.length;
 
-      const clampedOp = Math.max(0, Math.min(1, opacity));
-      el.style.opacity = clampedOp.toFixed(3);
-      el.style.setProperty('--y', `${y.toFixed(1)}px`);
-      el.style.pointerEvents = clampedOp > 0.6 ? 'auto' : 'none';
+  lenis.on('scroll', ({ scroll, limit, direction }) => {
+    const maxScroll = limit > 0 ? limit : (document.documentElement.scrollHeight - window.innerHeight);
+    targetProgress = maxScroll > 0 ? Math.min(1, Math.max(0, scroll / maxScroll)) : 0;
+
+    if (progressLine) {
+      progressLine.style.width = `${targetProgress * 100}%`;
+    }
+
+    audioManager.onUserScroll(targetProgress, direction);
+  });
+
+  function raf(time) {
+    lenis.raf(time);
+
+    const diff = targetProgress - smoothProgress;
+    const isMovingForward = smoothProgress >= prevSmoothProgress;
+    prevSmoothProgress = smoothProgress;
+
+    if (Math.abs(diff) > 0.00005) {
+      smoothProgress += diff * 0.16;
     } else {
-      el.style.opacity = '0';
-      el.style.pointerEvents = 'none';
+      smoothProgress = targetProgress;
+    }
+
+    const scaled = smoothProgress * (totalScenes - 0.0001);
+    const sceneIdx = Math.min(totalScenes - 1, Math.floor(scaled));
+    const sceneProg = smoothProgress >= 1 ? 1 : (scaled - sceneIdx);
+
+    const renderVal = sceneIdx * 1000 + Math.round(sceneProg * 1000);
+    if (renderVal !== lastRenderVal) {
+      lastRenderVal = renderVal;
+      renderSceneProgress(sceneIdx, sceneProg);
+    }
+
+    sections.forEach((sec, idx) => {
+      const textEl = sec.querySelector('.scene-text');
+      if (!textEl) return;
+
+      if (idx === sceneIdx) {
+        textEl.classList.add('active');
+        if (sec.id === 'scene-3' && !state.statsAnimated) {
+          animateStats();
+        }
+      } else {
+        textEl.classList.remove('active');
+      }
+    });
+
+    if (sceneIdx !== state.currentSceneIndex) {
+      state.currentSceneIndex = sceneIdx;
+      const config = SCENE_CONFIGS[sceneIdx];
+      if (config && config.soundKey) {
+        audioManager.playScene(config.soundKey, isMovingForward);
+      }
+    }
+
+    requestAnimationFrame(raf);
+  }
+
+  requestAnimationFrame(raf);
+  lenis.resize();
+
+  // Keyboard navigation support
+  window.addEventListener('keydown', (e) => {
+    if (document.getElementById('config-modal')?.classList.contains('open')) return;
+    if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+      lenis.scrollTo(window.scrollY + window.innerHeight * 0.8, { duration: 1.2 });
+    } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+      lenis.scrollTo(Math.max(0, window.scrollY - window.innerHeight * 0.8), { duration: 1.2 });
     }
   });
 }
 
-/* ─────────────────────────────────────────────
-   STAT COUNTERS ANIMATION
-───────────────────────────────────────────── */
-function animateStatCounters() {
-  const statEls = document.querySelectorAll('.stat-num[data-target]');
-  statEls.forEach((el) => {
-    const target = parseFloat(el.dataset.target);
-    const suffix = el.dataset.suffix || '';
-    const isDecimal = !!el.dataset.decimal;
+// ==========================================================================
+// UI Helpers & Sound Toggle
+// ==========================================================================
+function updateSoundUI() {
+  const soundWaves = document.getElementById('sound-waves');
+  const soundSlash = document.getElementById('sound-slash');
 
-    gsap.to(
-      { val: 0 },
-      {
-        val: target,
-        duration: 1.6,
-        ease: 'power2.out',
-        onUpdate() {
-          const v = this.targets()[0].val;
-          el.textContent = isDecimal
-            ? (v / 10).toFixed(1) + suffix
-            : Math.round(v) + suffix;
-        },
+  if (state.soundEnabled) {
+    if (soundWaves) soundWaves.classList.remove('muted');
+    if (soundSlash) soundSlash.classList.remove('muted');
+  } else {
+    if (soundWaves) soundWaves.classList.add('muted');
+    if (soundSlash) soundSlash.classList.add('muted');
+  }
+}
+
+function setLanguage(lang) {
+  state.currentLang = lang;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+
+  const langLabel = document.getElementById('lang-label');
+  if (langLabel) {
+    langLabel.textContent = lang === 'ar' ? 'EN' : 'AR';
+  }
+
+  const elements = document.querySelectorAll('[data-en][data-ar]');
+  elements.forEach((el) => {
+    const text = el.getAttribute(`data-${lang}`);
+    if (text) {
+      const hasChildrenWithData = el.querySelector('[data-en]');
+      if (!hasChildrenWithData) {
+        el.textContent = text;
       }
-    );
+    }
+  });
+
+  // Update selected color text in active language
+  const colorNameEl = document.getElementById('selected-color-name');
+  if (colorNameEl && COLOR_NAMES[state.activeColor]) {
+    colorNameEl.textContent = COLOR_NAMES[state.activeColor][lang] || state.activeColor;
+  }
+}
+
+function animateStats() {
+  state.statsAnimated = true;
+  const statNumbers = document.querySelectorAll('.stat-num[data-target]');
+
+  statNumbers.forEach((el) => {
+    const target = parseFloat(el.getAttribute('data-target') || '0');
+    const suffix = el.getAttribute('data-suffix') || '';
+    const isDecimal = el.hasAttribute('data-decimal');
+    const decimalPlaces = parseInt(el.getAttribute('data-decimal') || '0', 10);
+
+    const obj = { val: 0 };
+    gsap.to(obj, {
+      val: target,
+      duration: 1.8,
+      ease: 'power2.out',
+      onUpdate: () => {
+        let displayVal;
+        if (isDecimal) {
+          const scaled = obj.val / Math.pow(10, decimalPlaces);
+          displayVal = scaled.toFixed(decimalPlaces);
+        } else {
+          displayVal = Math.round(obj.val);
+        }
+        el.textContent = `${displayVal}${suffix}`;
+      },
+    });
   });
 }
 
-/* ─────────────────────────────────────────────
-   HEADER CONTROLS (I18N & SOUND)
-───────────────────────────────────────────── */
-function setupControls(withSound) {
-  // Language toggle
+// ==========================================================================
+// Configurator Modal Logic (Clean Mutex Transmission & Dynamic Colors)
+// ==========================================================================
+function setupConfigurator() {
+  if (document.getElementById('config-modal')) return;
+
+  const modal = document.createElement('div');
+  modal.id = 'config-modal';
+  modal.innerHTML = `
+    <div class="config-card">
+      <button class="config-close" id="config-close" aria-label="Close">&times;</button>
+      <h3 class="config-title" data-en="CONFIGURE YOUR M4" data-ar="صمّم سيارتك M4">CONFIGURE YOUR M4</h3>
+      <p class="config-sub" data-en="Customize your ultimate driving machine" data-ar="قم بتخصيص سيارة أحلامك الرياضية">Customize your ultimate driving machine</p>
+      
+      <div class="config-group">
+        <span class="config-label" data-en="Exterior Paint" data-ar="لون الطلاء الخارجي">Exterior Paint</span>
+        <div class="color-options" id="color-options">
+          <div class="color-swatch active" data-color="Isle of Man Green" data-en="Isle of Man Green" data-ar="أخضر جزيرة مان" style="background:#1b4d3e;" title="Isle of Man Green"></div>
+          <div class="color-swatch" data-color="Sao Paulo Yellow" data-en="Sao Paulo Yellow" data-ar="أصفر ساو باولو" style="background:#e3e026;" title="Sao Paulo Yellow"></div>
+          <div class="color-swatch" data-color="Toronto Red" data-en="Toronto Red" data-ar="أحمر تورونتو" style="background:#a31924;" title="Toronto Red"></div>
+          <div class="color-swatch" data-color="Portimao Blue" data-en="Portimao Blue" data-ar="أزرق بورتيماو" style="background:#0b3866;" title="Portimao Blue"></div>
+          <div class="color-swatch" data-color="Frozen Deep Grey" data-en="Frozen Deep Grey" data-ar="رمادي داكن متجمد" style="background:#3e4347;" title="Frozen Deep Grey"></div>
+          <div class="color-swatch" data-color="Alpine White" data-en="Alpine White" data-ar="أبيض ألبين" style="background:#f2f2f2;" title="Alpine White"></div>
+        </div>
+      </div>
+
+      <div class="config-group">
+        <span class="config-label" data-en="Transmission & Drivetrain" data-ar="ناقل الحركة ونظام الدفع">Transmission & Drivetrain</span>
+        <div class="spec-toggle-group">
+          <button class="spec-btn active" data-type="trans" data-price="0">
+            <strong data-en="M xDrive Competition" data-ar="إم إكس درايف كومبيتيشن">M xDrive Competition</strong><br>
+            <small style="opacity:0.7;" data-en="8-Speed M Steptronic" data-ar="ناقل ستيبترونيك 8 سرعات">8-Speed M Steptronic</small>
+          </button>
+          <button class="spec-btn" data-type="trans" data-price="-3800">
+            <strong data-en="M4 Pure Manual" data-ar="إم 4 يدوي خالص">M4 Pure Manual</strong><br>
+            <small style="opacity:0.7;" data-en="6-Speed Manual / RWD" data-ar="يدوي 6 سرعات / دفع خلفي">6-Speed Manual / RWD</small>
+          </button>
+        </div>
+      </div>
+
+      <div class="config-group">
+        <span class="config-label" data-en="M Performance Packages" data-ar="باقات M عالية الأداء">M Performance Packages</span>
+        <div class="spec-toggle-group">
+          <button class="spec-btn active" data-type="package" data-price="4700">
+            <strong data-en="M Carbon Package" data-ar="باقة ألياف الكربون M">M Carbon Package</strong><br>
+            <small style="opacity:0.7;" data-en="Diffuser, Mirror caps, Spoiler" data-ar="مشتت هواء، مرايا، وجناح خلفي">Diffuser, Mirror caps, Spoiler</small>
+          </button>
+          <button class="spec-btn" data-type="package" data-price="3800">
+            <strong data-en="M Carbon Bucket Seats" data-ar="مقاعد كاربون باكت الرياضية">M Carbon Bucket Seats</strong><br>
+            <small style="opacity:0.7;" data-en="Full Merino Leather" data-ar="جلد ميرينو فاخر">Full Merino Leather</small>
+          </button>
+        </div>
+      </div>
+
+      <div class="config-summary">
+        <div class="summary-row">
+          <span data-en="Base MSRP" data-ar="السعر الأساسي">Base MSRP</span>
+          <span>$79,100</span>
+        </div>
+        <div class="summary-row">
+          <span id="selected-color-name">Isle of Man Green</span>
+          <span data-en="Included" data-ar="مشمول">Included</span>
+        </div>
+        <div class="summary-row">
+          <span data-en="Options Total" data-ar="مجموع الخيارات">Options Total</span>
+          <span id="options-total">$4,700</span>
+        </div>
+        <div class="summary-row total">
+          <span data-en="Total Est. Price" data-ar="إجمالي السعر التقديري">Total Est. Price</span>
+          <span id="total-price" style="color:var(--amber-bright);">$83,800</span>
+        </div>
+      </div>
+
+      <div style="margin-top:1.5rem; text-align:center;">
+        <button class="cta-btn" id="save-spec-btn" style="width:100%; justify-content:center;">
+          <span data-en="Confirm Specification" data-ar="تأكيد المواصفات">Confirm Specification</span>
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const closeBtn = document.getElementById('config-close');
+  const swatches = modal.querySelectorAll('.color-swatch');
+  const specBtns = modal.querySelectorAll('.spec-btn');
+  const colorNameEl = document.getElementById('selected-color-name');
+  const optionsTotalEl = document.getElementById('options-total');
+  const totalPriceEl = document.getElementById('total-price');
+  const saveBtn = document.getElementById('save-spec-btn');
+
+  const basePrice = 79100;
+  let optionsPrice = 4700;
+
+  function updatePrices() {
+    optionsTotalEl.textContent = `$${optionsPrice.toLocaleString()}`;
+    totalPriceEl.textContent = `$${(basePrice + optionsPrice).toLocaleString()}`;
+  }
+
+  swatches.forEach((s) => {
+    s.addEventListener('click', () => {
+      swatches.forEach((x) => x.classList.remove('active'));
+      s.classList.add('active');
+      state.activeColor = s.getAttribute('data-color');
+      const lang = state.currentLang;
+      colorNameEl.textContent = s.getAttribute(`data-${lang}`) || state.activeColor;
+    });
+  });
+
+  specBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.type === 'trans') {
+        modal.querySelectorAll('.spec-btn[data-type="trans"]').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+      } else {
+        btn.classList.toggle('active');
+      }
+
+      let optSum = 0;
+      modal.querySelectorAll('.spec-btn.active').forEach((activeBtn) => {
+        optSum += parseInt(activeBtn.getAttribute('data-price') || '0', 10);
+      });
+      optionsPrice = Math.max(0, optSum);
+      updatePrices();
+    });
+  });
+
+  function closeModal() {
+    modal.classList.remove('open');
+  }
+
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('open')) {
+      closeModal();
+    }
+  });
+
+  saveBtn.addEventListener('click', () => {
+    saveBtn.innerHTML = `<span>✓ ${state.currentLang === 'ar' ? 'تم حفظ المواصفات بنجاح!' : 'Specification Saved!'}</span>`;
+    setTimeout(() => {
+      closeModal();
+      saveBtn.innerHTML = `<span data-en="Confirm Specification" data-ar="تأكيد المواصفات">${state.currentLang === 'ar' ? 'تأكيد المواصفات' : 'Confirm Specification'}</span>`;
+    }, 1000);
+  });
+
+  const ctaBtn = document.querySelector('.cta-btn');
+  if (ctaBtn) {
+    ctaBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      modal.classList.add('open');
+      setLanguage(state.currentLang);
+    });
+  }
+
+  const ctaLink = document.querySelector('.cta-link');
+  if (ctaLink) {
+    ctaLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      const sec3 = document.getElementById('scene-3');
+      if (sec3 && lenis) {
+        lenis.scrollTo(sec3, { duration: 1.5 });
+      }
+    });
+  }
+}
+
+// ==========================================================================
+// Main Bootloader
+// ==========================================================================
+function bootApp() {
+  const loaderEl = document.getElementById('loader');
+  const loaderFill = document.getElementById('loader-fill');
+  const loaderPct = document.getElementById('loader-pct');
+
+  const btnMute = document.getElementById('btn-mute');
+  const btnLang = document.getElementById('btn-lang');
+
+  initCanvas();
+  updateSoundUI();
+  setupConfigurator();
+
+  function dismissLoader() {
+    if (loaderEl && !loaderEl.classList.contains('fade-out')) {
+      loaderEl.classList.add('fade-out');
+    }
+  }
+
+  setTimeout(dismissLoader, 350);
+
+  loadSingleImage('s1', 1).then((img) => {
+    if (img) {
+      drawDirect(img);
+    }
+    if (loaderFill) loaderFill.style.width = '100%';
+    if (loaderPct) loaderPct.textContent = '100%';
+    dismissLoader();
+  }).catch(() => {
+    dismissLoader();
+  });
+
+  for (let i = 2; i <= 30; i++) {
+    loadSingleImage('s1', i);
+  }
+
+  startIdlePreload();
+  setupScroll();
+
+  const firstText = document.querySelector('#scene-1 .scene-text');
+  if (firstText) {
+    firstText.classList.add('active');
+  }
+
+  function unlockAudio() {
+    if (state.soundInitialized) return;
+    state.soundInitialized = true;
+    audioManager.unlockAll();
+    audioManager.playScene('scene-1', true);
+
+    window.removeEventListener('pointerdown', unlockAudio);
+    window.removeEventListener('keydown', unlockAudio);
+    window.removeEventListener('wheel', unlockAudio);
+    window.removeEventListener('touchstart', unlockAudio);
+  }
+
+  window.addEventListener('pointerdown', unlockAudio, { passive: true });
+  window.addEventListener('keydown', unlockAudio, { passive: true });
+  window.addEventListener('wheel', unlockAudio, { passive: true });
+  window.addEventListener('touchstart', unlockAudio, { passive: true });
+
+  if (btnMute) {
+    btnMute.addEventListener('click', () => {
+      state.soundEnabled = !state.soundEnabled;
+      audioManager.isMuted = !state.soundEnabled;
+      updateSoundUI();
+      if (!state.soundEnabled) {
+        audioManager.stopAll();
+      } else {
+        unlockAudio();
+      }
+    });
+  }
+
   if (btnLang) {
     btnLang.addEventListener('click', () => {
-      const newLang = i18n.toggle();
-      if (langLabel) {
-        langLabel.textContent = newLang === 'en' ? 'AR' : 'EN';
-      }
-    });
-  }
-
-  // Sound toggle button
-  if (btnMute) {
-    if (!withSound) {
-      btnMute.style.opacity = '0.35';
-    }
-
-    btnMute.addEventListener('click', () => {
-      const isMuted = audio.toggleMute();
-      const waves = document.getElementById('sound-waves');
-      if (waves) {
-        waves.style.opacity = isMuted ? '0.2' : '1.0';
-      }
-      btnMute.style.opacity = isMuted ? '0.45' : '1.0';
+      const nextLang = state.currentLang === 'en' ? 'ar' : 'en';
+      setLanguage(nextLang);
     });
   }
 }
 
-/* ─────────────────────────────────────────────
-   BOOTSTRAP & EVENT LISTENERS
-───────────────────────────────────────────── */
-window.addEventListener('DOMContentLoaded', () => {
-  document.body.style.overflow = 'hidden';
-  init().catch(console.error);
-});
-
-// Handle viewport resize: switch between mobile and desktop assets if threshold crossed
-window.addEventListener('resize', () => {
-  const nowMobile = window.innerWidth < MOBILE_BREAKPOINT;
-  if (nowMobile !== isMobile) {
-    isMobile = nowMobile;
-    if (progressiveLoader) {
-      progressiveLoader.mobile = isMobile;
-      progressiveLoader.cache = {}; // Invalidate old bitmaps
-      progressiveLoader.loadSection(1).catch(() => {});
-    }
-  }
-});
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}
