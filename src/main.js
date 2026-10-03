@@ -11,18 +11,9 @@ const SCENE_CONFIGS = [
   { id: 'scene-r', reverse: true, soundKey: 'scene-r' },
   { id: 'scene-4', folder: 's4', frameCount: 240, soundKey: 'scene-4' },
   { id: 'scene-5', folder: 's5', frameCount: 171, soundKey: 'scene-5' },
-  { id: 'scene-6', folder: 's6', frameCount: 240, soundKey: 'scene-6' },
-  { id: 'scene-7', folder: 's7', frameCount: 192, soundKey: 'scene-7' },
+  { id: 'scene-6', folder: 's6', frameCount: 120, soundKey: 'scene-6' },
+  { id: 'scene-7', folder: 's7', frameCount: 120, soundKey: 'scene-7' },
 ];
-
-const COLOR_NAMES = {
-  'Isle of Man Green': { en: 'Isle of Man Green', ar: 'أخضر جزيرة مان' },
-  'Sao Paulo Yellow': { en: 'Sao Paulo Yellow', ar: 'أصفر ساو باولو' },
-  'Toronto Red': { en: 'Toronto Red', ar: 'أحمر تورونتو' },
-  'Portimao Blue': { en: 'Portimao Blue', ar: 'أزرق بورتيماو' },
-  'Frozen Deep Grey': { en: 'Frozen Deep Grey', ar: 'رمادي داكن متجمد' },
-  'Alpine White': { en: 'Alpine White', ar: 'أبيض ألبين' },
-};
 
 const state = {
   soundEnabled: true,
@@ -30,11 +21,10 @@ const state = {
   currentLang: 'en',
   statsAnimated: false,
   currentSceneIndex: -1,
-  activeColor: 'Isle of Man Green',
 };
 
 // ==========================================================================
-// Intelligent Cross-Fading Audio Engine (Zero-Glitch, Context-Aware)
+// Intelligent Cross-Fading Audio Engine
 // ==========================================================================
 class AudioManager {
   constructor() {
@@ -108,7 +98,7 @@ class AudioManager {
 
     clearInterval(audio._fadeInterval);
     const stepTime = 25;
-    const step = (targetVol / (duration / stepTime));
+    const step = targetVol / (duration / stepTime);
 
     audio._fadeInterval = setInterval(() => {
       if (audio.volume + step >= targetVol) {
@@ -139,7 +129,7 @@ class AudioManager {
     }, stepTime);
   }
 
-  onUserScroll(progress, direction) {
+  onUserScroll(direction) {
     if (!state.soundEnabled || this.isMuted) return;
 
     if (this.currentAudio && this.currentAudio.volume < 0.4 && !this.currentAudio.paused) {
@@ -170,7 +160,7 @@ class AudioManager {
 const audioManager = new AudioManager();
 
 // ==========================================================================
-// Image Cache & Preloader (100% IFrame & Cross-Browser Safe)
+// Image Cache & Preloader (100% Reliable & Memory Optimized)
 // ==========================================================================
 const frameCache = new Map();
 const requestedKeys = new Set();
@@ -190,8 +180,11 @@ function getFrameUrl(folder, frameNum) {
 
 function loadSingleImage(folder, frameNum) {
   const key = getFrameKey(folder, frameNum);
-  if (frameCache.has(key) || requestedKeys.has(key)) {
+  if (frameCache.has(key)) {
     return Promise.resolve(frameCache.get(key));
+  }
+  if (requestedKeys.has(key)) {
+    return Promise.resolve(null);
   }
 
   requestedKeys.add(key);
@@ -210,7 +203,7 @@ function loadSingleImage(folder, frameNum) {
 }
 
 function preloadUpcomingFrames(currentFolder, currentFrame) {
-  for (let i = 1; i <= 20; i++) {
+  for (let i = 1; i <= 25; i++) {
     loadSingleImage(currentFolder, currentFrame + i);
   }
 }
@@ -223,9 +216,9 @@ function startIdlePreload() {
   function loadNextStep() {
     if (sIdx >= scenes.length) return;
     const folder = scenes[sIdx];
-    const maxF = folder === 's4' || folder === 's6' ? 240 : (folder === 's5' ? 171 : 192);
+    const maxF = folder === 's4' ? 240 : (folder === 's5' ? 171 : (folder === 's6' || folder === 's7' ? 120 : 192));
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       if (fIdx <= maxF) {
         loadSingleImage(folder, fIdx);
         fIdx++;
@@ -239,15 +232,15 @@ function startIdlePreload() {
     if (window.requestIdleCallback) {
       window.requestIdleCallback(loadNextStep);
     } else {
-      setTimeout(loadNextStep, 35);
+      setTimeout(loadNextStep, 25);
     }
   }
 
-  setTimeout(loadNextStep, 400);
+  setTimeout(loadNextStep, 300);
 }
 
 // ==========================================================================
-// Canvas Renderer (Robust, Crisp, Zero-Crash)
+// Canvas Renderer (High-Performance 60FPS)
 // ==========================================================================
 let canvas = null;
 let ctx = null;
@@ -255,7 +248,7 @@ let ctx = null;
 function initCanvas() {
   canvas = document.getElementById('main-canvas');
   if (!canvas) return;
-  ctx = canvas.getContext('2d');
+  ctx = canvas.getContext('2d', { alpha: false });
   if (ctx) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -303,7 +296,6 @@ function drawDirect(img) {
   const dx = (cw - dw) * 0.5;
   const dy = (ch - dh) * 0.5;
 
-  ctx.clearRect(0, 0, cw, ch);
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
@@ -348,7 +340,8 @@ function renderSceneProgress(sceneIndex, sceneProgress) {
 
   preloadUpcomingFrames(folder, targetFrame);
 
-  for (let offset = 1; offset <= 35; offset++) {
+  // Fast nearest-frame fallback during active scrub
+  for (let offset = 1; offset <= 40; offset++) {
     const prev = frameCache.get(getFrameKey(folder, Math.max(1, targetFrame - offset)));
     if (prev) {
       drawDirect(prev);
@@ -377,7 +370,7 @@ let prevSmoothProgress = 0;
 
 function setupScroll() {
   lenis = new Lenis({
-    duration: 1.1,
+    duration: 1.0,
     easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
     smoothWheel: true,
     touchMultiplier: 1.5,
@@ -395,7 +388,7 @@ function setupScroll() {
       progressLine.style.width = `${targetProgress * 100}%`;
     }
 
-    audioManager.onUserScroll(targetProgress, direction);
+    audioManager.onUserScroll(direction);
   });
 
   function raf(time) {
@@ -406,7 +399,7 @@ function setupScroll() {
     prevSmoothProgress = smoothProgress;
 
     if (Math.abs(diff) > 0.00005) {
-      smoothProgress += diff * 0.16;
+      smoothProgress += diff * 0.18;
     } else {
       smoothProgress = targetProgress;
     }
@@ -449,9 +442,7 @@ function setupScroll() {
   requestAnimationFrame(raf);
   lenis.resize();
 
-  // Keyboard navigation support
   window.addEventListener('keydown', (e) => {
-    if (document.getElementById('config-modal')?.classList.contains('open')) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown') {
       lenis.scrollTo(window.scrollY + window.innerHeight * 0.8, { duration: 1.2 });
     } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
@@ -496,12 +487,6 @@ function setLanguage(lang) {
       }
     }
   });
-
-  // Update selected color text in active language
-  const colorNameEl = document.getElementById('selected-color-name');
-  if (colorNameEl && COLOR_NAMES[state.activeColor]) {
-    colorNameEl.textContent = COLOR_NAMES[state.activeColor][lang] || state.activeColor;
-  }
 }
 
 function animateStats() {
@@ -534,176 +519,6 @@ function animateStats() {
 }
 
 // ==========================================================================
-// Configurator Modal Logic (Clean Mutex Transmission & Dynamic Colors)
-// ==========================================================================
-function setupConfigurator() {
-  if (document.getElementById('config-modal')) return;
-
-  const modal = document.createElement('div');
-  modal.id = 'config-modal';
-  modal.innerHTML = `
-    <div class="config-card">
-      <button class="config-close" id="config-close" aria-label="Close">&times;</button>
-      <h3 class="config-title" data-en="CONFIGURE YOUR M4" data-ar="صمّم سيارتك M4">CONFIGURE YOUR M4</h3>
-      <p class="config-sub" data-en="Customize your ultimate driving machine" data-ar="قم بتخصيص سيارة أحلامك الرياضية">Customize your ultimate driving machine</p>
-      
-      <div class="config-group">
-        <span class="config-label" data-en="Exterior Paint" data-ar="لون الطلاء الخارجي">Exterior Paint</span>
-        <div class="color-options" id="color-options">
-          <div class="color-swatch active" data-color="Isle of Man Green" data-en="Isle of Man Green" data-ar="أخضر جزيرة مان" style="background:#1b4d3e;" title="Isle of Man Green"></div>
-          <div class="color-swatch" data-color="Sao Paulo Yellow" data-en="Sao Paulo Yellow" data-ar="أصفر ساو باولو" style="background:#e3e026;" title="Sao Paulo Yellow"></div>
-          <div class="color-swatch" data-color="Toronto Red" data-en="Toronto Red" data-ar="أحمر تورونتو" style="background:#a31924;" title="Toronto Red"></div>
-          <div class="color-swatch" data-color="Portimao Blue" data-en="Portimao Blue" data-ar="أزرق بورتيماو" style="background:#0b3866;" title="Portimao Blue"></div>
-          <div class="color-swatch" data-color="Frozen Deep Grey" data-en="Frozen Deep Grey" data-ar="رمادي داكن متجمد" style="background:#3e4347;" title="Frozen Deep Grey"></div>
-          <div class="color-swatch" data-color="Alpine White" data-en="Alpine White" data-ar="أبيض ألبين" style="background:#f2f2f2;" title="Alpine White"></div>
-        </div>
-      </div>
-
-      <div class="config-group">
-        <span class="config-label" data-en="Transmission & Drivetrain" data-ar="ناقل الحركة ونظام الدفع">Transmission & Drivetrain</span>
-        <div class="spec-toggle-group">
-          <button class="spec-btn active" data-type="trans" data-price="0">
-            <strong data-en="M xDrive Competition" data-ar="إم إكس درايف كومبيتيشن">M xDrive Competition</strong><br>
-            <small style="opacity:0.7;" data-en="8-Speed M Steptronic" data-ar="ناقل ستيبترونيك 8 سرعات">8-Speed M Steptronic</small>
-          </button>
-          <button class="spec-btn" data-type="trans" data-price="-3800">
-            <strong data-en="M4 Pure Manual" data-ar="إم 4 يدوي خالص">M4 Pure Manual</strong><br>
-            <small style="opacity:0.7;" data-en="6-Speed Manual / RWD" data-ar="يدوي 6 سرعات / دفع خلفي">6-Speed Manual / RWD</small>
-          </button>
-        </div>
-      </div>
-
-      <div class="config-group">
-        <span class="config-label" data-en="M Performance Packages" data-ar="باقات M عالية الأداء">M Performance Packages</span>
-        <div class="spec-toggle-group">
-          <button class="spec-btn active" data-type="package" data-price="4700">
-            <strong data-en="M Carbon Package" data-ar="باقة ألياف الكربون M">M Carbon Package</strong><br>
-            <small style="opacity:0.7;" data-en="Diffuser, Mirror caps, Spoiler" data-ar="مشتت هواء، مرايا، وجناح خلفي">Diffuser, Mirror caps, Spoiler</small>
-          </button>
-          <button class="spec-btn" data-type="package" data-price="3800">
-            <strong data-en="M Carbon Bucket Seats" data-ar="مقاعد كاربون باكت الرياضية">M Carbon Bucket Seats</strong><br>
-            <small style="opacity:0.7;" data-en="Full Merino Leather" data-ar="جلد ميرينو فاخر">Full Merino Leather</small>
-          </button>
-        </div>
-      </div>
-
-      <div class="config-summary">
-        <div class="summary-row">
-          <span data-en="Base MSRP" data-ar="السعر الأساسي">Base MSRP</span>
-          <span>$79,100</span>
-        </div>
-        <div class="summary-row">
-          <span id="selected-color-name">Isle of Man Green</span>
-          <span data-en="Included" data-ar="مشمول">Included</span>
-        </div>
-        <div class="summary-row">
-          <span data-en="Options Total" data-ar="مجموع الخيارات">Options Total</span>
-          <span id="options-total">$4,700</span>
-        </div>
-        <div class="summary-row total">
-          <span data-en="Total Est. Price" data-ar="إجمالي السعر التقديري">Total Est. Price</span>
-          <span id="total-price" style="color:var(--amber-bright);">$83,800</span>
-        </div>
-      </div>
-
-      <div style="margin-top:1.5rem; text-align:center;">
-        <button class="cta-btn" id="save-spec-btn" style="width:100%; justify-content:center;">
-          <span data-en="Confirm Specification" data-ar="تأكيد المواصفات">Confirm Specification</span>
-        </button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-
-  const closeBtn = document.getElementById('config-close');
-  const swatches = modal.querySelectorAll('.color-swatch');
-  const specBtns = modal.querySelectorAll('.spec-btn');
-  const colorNameEl = document.getElementById('selected-color-name');
-  const optionsTotalEl = document.getElementById('options-total');
-  const totalPriceEl = document.getElementById('total-price');
-  const saveBtn = document.getElementById('save-spec-btn');
-
-  const basePrice = 79100;
-  let optionsPrice = 4700;
-
-  function updatePrices() {
-    optionsTotalEl.textContent = `$${optionsPrice.toLocaleString()}`;
-    totalPriceEl.textContent = `$${(basePrice + optionsPrice).toLocaleString()}`;
-  }
-
-  swatches.forEach((s) => {
-    s.addEventListener('click', () => {
-      swatches.forEach((x) => x.classList.remove('active'));
-      s.classList.add('active');
-      state.activeColor = s.getAttribute('data-color');
-      const lang = state.currentLang;
-      colorNameEl.textContent = s.getAttribute(`data-${lang}`) || state.activeColor;
-    });
-  });
-
-  specBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.type === 'trans') {
-        modal.querySelectorAll('.spec-btn[data-type="trans"]').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-      } else {
-        btn.classList.toggle('active');
-      }
-
-      let optSum = 0;
-      modal.querySelectorAll('.spec-btn.active').forEach((activeBtn) => {
-        optSum += parseInt(activeBtn.getAttribute('data-price') || '0', 10);
-      });
-      optionsPrice = Math.max(0, optSum);
-      updatePrices();
-    });
-  });
-
-  function closeModal() {
-    modal.classList.remove('open');
-  }
-
-  closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) closeModal();
-  });
-
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal.classList.contains('open')) {
-      closeModal();
-    }
-  });
-
-  saveBtn.addEventListener('click', () => {
-    saveBtn.innerHTML = `<span>✓ ${state.currentLang === 'ar' ? 'تم حفظ المواصفات بنجاح!' : 'Specification Saved!'}</span>`;
-    setTimeout(() => {
-      closeModal();
-      saveBtn.innerHTML = `<span data-en="Confirm Specification" data-ar="تأكيد المواصفات">${state.currentLang === 'ar' ? 'تأكيد المواصفات' : 'Confirm Specification'}</span>`;
-    }, 1000);
-  });
-
-  const ctaBtn = document.querySelector('.cta-btn');
-  if (ctaBtn) {
-    ctaBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      modal.classList.add('open');
-      setLanguage(state.currentLang);
-    });
-  }
-
-  const ctaLink = document.querySelector('.cta-link');
-  if (ctaLink) {
-    ctaLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      const sec3 = document.getElementById('scene-3');
-      if (sec3 && lenis) {
-        lenis.scrollTo(sec3, { duration: 1.5 });
-      }
-    });
-  }
-}
-
-// ==========================================================================
 // Main Bootloader
 // ==========================================================================
 function bootApp() {
@@ -716,7 +531,6 @@ function bootApp() {
 
   initCanvas();
   updateSoundUI();
-  setupConfigurator();
 
   function dismissLoader() {
     if (loaderEl && !loaderEl.classList.contains('fade-out')) {
@@ -724,7 +538,7 @@ function bootApp() {
     }
   }
 
-  setTimeout(dismissLoader, 350);
+  setTimeout(dismissLoader, 300);
 
   loadSingleImage('s1', 1).then((img) => {
     if (img) {
@@ -737,7 +551,7 @@ function bootApp() {
     dismissLoader();
   });
 
-  for (let i = 2; i <= 30; i++) {
+  for (let i = 2; i <= 25; i++) {
     loadSingleImage('s1', i);
   }
 
